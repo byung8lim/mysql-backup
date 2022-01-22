@@ -29,6 +29,8 @@ spec:
           mountPath: /var/lib/mysql
         - name: mysql-backup-storage
           mountPath: /byung8
+        - name: mysql-socket
+          mountPath: /var/run/mysqld
       - image: kube-01.byung8.com:5000/mysql:0.2
         securityContext:
           runAsUser: 1001
@@ -39,7 +41,7 @@ spec:
               command:
               - /bin/sh
               - -c
-              - mkdir -p /byung8/logs /byung8/run /byung8/backups
+              - mkdir -p /byung8/logs /byung8/backups
         env:
         - name: MYSQL_ROOT_PASSWORD
           value: password
@@ -51,6 +53,8 @@ spec:
           mountPath: /var/lib/mysql
         - name: mysql-backup-storage
           mountPath: /byung8
+        - name: mysql-socket
+          mountPath: /var/run/mysqld
       volumes:
       - name: mysql-persistent-storage
         persistentVolumeClaim:
@@ -58,22 +62,9 @@ spec:
       - name: mysql-backup-storage
         persistentVolumeClaim:
           claimName: mysql-backup-pv-claim
+      - name: mysql-socket
+        emptyDir: {}
 ---
-#apiVersion: v1
-#kind: PersistentVolume
-#metadata:
-#  name: mysql-pv-volume
-#  labels:
-#    type: local
-#spec:
-#  storageClassName: manual
-#  capacity:
-#    storage: 20Gi
-#  accessModes:
-#    - ReadWriteOnce
-#  hostPath:
-#    path: "/data/mysql/data"
-#---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -96,21 +87,6 @@ spec:
   selector:
     app: mysql
 ---
-#apiVersion: v1
-#kind: PersistentVolume
-#metadata:
-#  name: mysql-backup-volume
-#  labels:
-#    type: local
-#spec:
-#  storageClassName: manual
-#  capacity:
-#    storage: 20Gi
-#  accessModes:
-#    - ReadWriteOnce
-#  hostPath:
-#    path: "/data/mysql/byung8"
-#---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -122,4 +98,4 @@ spec:
   resources:
     requests:
       storage: 20Gi
-
+---
