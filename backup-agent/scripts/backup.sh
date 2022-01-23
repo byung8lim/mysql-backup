@@ -105,22 +105,28 @@ fi
 log "mysql --defaults-file=$DEFAULTS_FILE -e 'show master status \G' | awk '/File:/{print \"PRE_BACKUP_BIN=\"\$2} /Position:/{print \"PRE_BACKUP_POS=\"\$2}'"
 mysql --defaults-file=$DEFAULTS_FILE -e 'show master status \G' | awk '/File:/{print "PRE_BACKUP_BIN="$2} /Position:/{print "PRE_BACKUP_POS="$2}' >> $BACKUP_DIR/info.txt
 
-log "mysqldump --defaults-file=${DEFAULTS_FILE} --quick --flush-logs --single-transaction=TRUE --routines --triggers -B $DB_NAME > $BACKUP_DIR/$FILE"
-mysqldump --defaults-file=$DEFAULTS_FILE --quick --flush-logs --single-transaction=TRUE --routines --triggers -B $DB_NAME > $BACKUP_DIR/$FILE
+log "mysqldump --defaults-file=${DEFAULTS_FILE} --quick --flush-logs --single-transaction=TRUE --routines --triggers -F --master-data=2 -B $DB_NAME > $BACKUP_DIR/$FILE"
+mysqldump --defaults-file=$DEFAULTS_FILE --quick --flush-logs --single-transaction=TRUE --routines --triggers -F --master-data=2 -B $DB_NAME > $BACKUP_DIR/$FILE
 
 # if mysqldump return cd is not 0, 202
 
 #Read and Record Binary Log & Position from dump file
-#grep "CHANGE MASTER" /tmp/$FILE | sed 's/\x27//g' | awk -F '=' '/MASTER_LOG_FILE/{
-#  printf "BACKUP_BIN_FILE=%s\n",substr($2,1,index($2,",")-1);
-#  printf "BACKUP_BIN_POS=%s\n",substr($3, 1, length($3)-1);
-#}' >> /tmp/info.txt
+grep "CHANGE MASTER" $BACKUP_DIR/$FILE | sed 's/\x27//g' | awk -F '=' '/MASTER_LOG_FILE/{
+  printf "BACKUP_BIN_FILE=%s\n",substr($2,1,index($2,",")-1);
+  printf "BACKUP_BIN_POS=%s\n",substr($3, 1, length($3)-1);
+}' >> $BACKUP_DIR/info.txt
 
 if [ ! -f $BACKUP_DIR/$FILE ];then
   error "Backup file not found : $BACKUP_DIR/$FILE"
   echo "RESULT_CD=201"
   end 201
 fi
+
+BACKUP_BIN_FILE=$(grep BACKUP_BIN_FILE $BACKUP_DIR/info.txt | awk -F '=' '{print $2}')
+BACKUP_BIN_POS=$(grep BACKUP_BIN_POS $BACKUP_DIR/info.txt | awk -F '=' '{print $2}')
+
+log "BACKUP_BIN_FILE = $BACKUP_BIN_FILE"
+log "BACKUP_BIN_POS = $BACKUP_BIN_POS"
 
 #Record Binary Log & Position after dump
 log "mysql --defaults-file=$DEFAULTS_FILE -e 'show master status \G' | awk '/File:/{print "POST_BACKUP_BIN=\"\$2} /Position:/{print "POST_BACKUP_POS=\"\$2}'"
@@ -134,33 +140,34 @@ else
   log "DUMP_SIZE=$DUMP_SIZE"
 fi
 echo "DUMP_SIZE=$DUMP_SIZE">> $BACKUP_DIR/info.txt
-log "FILE_SIZE=$DUMP_SIZE"
-echo "FILE_SIZE=$DUMP_SIZE">> $BACKUP_DIR/info.txt
 
 #Backup File Checksum
-sha1sum /tmp/$FILE | awk '{print $1}'> $BACKUP_DIR/$CHKSUM_FILE
+sha1sum $BACKUP_DIR/$FILE | awk '{print $1}'> $BACKUP_DIR/$CHKSUM_FILE
 
 log "DUMP_CHKSUM=\$(cat $BACKUP_DIR/$CHKSUM_FILE)"
 DUMP_CHKSUM=$(cat $BACKUP_DIR/$CHKSUM_FILE)
 log "DUMP_CHKSUM=$DUMP_CHKSUM"
 echo "DUMP_CHKSUM=$DUMP_CHKSUM" >> $BACKUP_DIR/info.txt
-log "BACKUP_CHKSUM=$DUMP_CHKSUM"
-echo "BACKUP_CHKSUM=$DUMP_CHKSUM" >> $BACKUP_DIR/info.txt
 
 unset PURGE_BIN
 PRE_BACKUP_BIN=$(grep 'PRE_BACKUP_BIN' $BACKUP_DIR/info.txt | awk -F '=' '{print $2}')
 #BACKUP_BIN_FILE=$(grep 'BACKUP_BIN_FILE' $BACKUP_DIR/info.txt | awk -F '=' '{print $2}')
 POST_BACKUP_BIN=$(grep 'POST_BACKUP_BIN' $BACKUP_DIR/info.txt | awk -F '=' '{print $2}')
 
-PURGE_BIN=$PRE_BACKUP_BIN
+if [ -z "$BACKUP_BIN_FILE" ];then
+  PURGE_BIN=$PRE_BACKUP_BIN
+else
+  PURGE_BIN=$BACKUP_BIN_FILE
+fi
 
 BINLOG_CNT=$(mysql --defaults-file=$DEFAULTS_FILE -e "show binary logs" | awk 'BEGIN{cnt=0;}/binlog.[0-9]+/{cnt+=1;}END{print cnt}')
 log "PURGE_BIN=$PURGE_BIN"
 log "BINLOG_CNT=$BINLOG_CNT before purging binlog"
-if [ $BINLOG_CNT -gt 3 ];then
-  mysql --defaults-file=$DEFAULTS_FILE -e "purge binary logs to '${PURGE_BIN}'"
-  BINLOG_CNT=$(mysql --defaults-file=$DEFAULTS_FILE -e "show binary logs" | awk 'BEGIN{cnt=0;}/binlog.[0-9]+/{cnt+=1;}END{print cnt}')
-fi
+
+log "mysql --defaults-file=$DEFAULTS_FILE -e purge binary logs to '${PURGE_BIN}'"
+mysql --defaults-file=$DEFAULTS_FILE -e "purge binary logs to '${PURGE_BIN}'"
+BINLOG_CNT=$(mysql --defaults-file=$DEFAULTS_FILE -e "show binary logs" | awk 'BEGIN{cnt=0;}/binlog.[0-9]+/{cnt+=1;}END{print cnt}')
+
 log "BINLOG_CNT=$BINLOG_CNT after purging binlog"
 echo "BINLOG_CNT=$BINLOG_CNT" >> $BACKUP_DIR/info.txt
 
@@ -219,4 +226,3 @@ log "rm -f $BACKUP_DIR/$CHKSUM_FILE"
 rm -f $BACKUP_DIR/$CHKSUM_FILE
 log "$NAMESPACE completed"
 end 0
-
